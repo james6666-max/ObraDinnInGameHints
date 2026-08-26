@@ -1,0 +1,47 @@
+# Build and generated output
+/obj/
+/dist/
+/bin/
+/Debug/
+/Release/
+
+# Local/private source material and investigation workspace
+/work/
+/outputs/
+/ANALYSIS/
+
+# Private hint inputs and embedded-data intermediates
+**/private_hint_source/
+**/faces_data.json
+**/correct_name_list.json
+**/hints.dat
+
+# Game/runtime files, local configuration, logs and backups
+BepInEx/
+steam_appid.txt
+*.log
+*.bak
+*.pending
+*.state
+state.json
+
+# Compiled or packaged binaries must not be committed. A build embeds
+# private hint data and should be produced locally when needed.
+*.dll
+*.pdb
+*.mdb
+*.exe
+*.zip
+*.7z
+*.rar
+
+# Operating-system and editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vs/
+.vscode/
+*.user
+*.suo
+*.tmp
+*.temp
