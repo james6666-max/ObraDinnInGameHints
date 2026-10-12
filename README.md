@@ -6,13 +6,65 @@
 
 原创源码、脚本和文档采用 [MIT 许可证](LICENSE)。第三方提示内容和游戏资源不在此授权范围内。当前提供源码供审查、修改和本地构建，暂不提供包含第三方提示数据的公开 DLL。
 
-## v1.0.5
+## 提示来源与致谢
 
-- 修复鼠标在提示面板内被游戏每帧拉回中央、导致光标抽搐和点击失效的问题。
-- 面板打开期间临时接管 `RInput`：保留原方法执行但强制其走非锁定分支，并使用物理鼠标坐标供游戏 UI 命中测试。
-- 暂停游戏自绘 `MouseCursor`，避免与系统光标重叠；关闭面板、隐藏日志、插件禁用或销毁时恢复原始状态。
-- 保留 900×590 面板、分隔线、有人物双栏/无人物单栏及按可见按钮自动居中布局。
-- 修复提示数据的船员索引到游戏真实 ID 映射。
+感谢 [@Yide-Zhang](https://github.com/Yide-Zhang) 制作的 [ObraDinn-HintsAndCheck（奥伯拉丁提示与验证工具）](https://github.com/Yide-Zhang/ObraDinn-HintsAndCheck)。本模组的本地提示与答案映射来自该项目；本项目负责游戏内界面、进度读取和逐层展示，不代表原作者参与或为本模组背书。
+
+需要手动获取时，可在上游下载这两个文件：
+
+- [faces_data.json：分层提示（含剧透）](https://github.com/Yide-Zhang/ObraDinn-HintsAndCheck/blob/dcfa6c557e01078e449ae753967fc752844367f3/faces_data.json)
+- [correct_name_list.json：答案映射（含剧透）](https://github.com/Yide-Zhang/ObraDinn-HintsAndCheck/blob/dcfa6c557e01078e449ae753967fc752844367f3/correct_name_list.json)
+
+不想看到答案正文，直接使用下方安装命令即可，不必打开 JSON。工具从原仓库下载固定版本并核对 SHA256，不将提示正文打印到终端。署名与链接不等于再分发授权；提示内容不适用本项目 MIT 许可证。
+
+## 快速安装（Windows）
+
+**只需准备一次：**
+
+1. 下载本仓库源码（GitHub 页面 **Code → Download ZIP**），解压到普通可写目录，不要在压缩包中运行。已有 Git 的用户也可以克隆仓库，无需安装 Visual Studio。
+2. 在 Steam 库中右键游戏 → **管理 → 浏览本地文件**，记下包含 `ObraDinn.exe` 的目录。
+3. 若尚未装 BepInEx，前往 [BepInEx 5.4.23.5 官方下载页](https://github.com/BepInEx/BepInEx/releases/tag/v5.4.23.5)，下载 **BepInEx_win_x86_5.4.23.5.zip**，解压到游戏目录。本项目验证的 build 9550393 是 32 位游戏，即使 Windows 是 64 位也应选 x86。其他游戏版本请按实际程序位数选择；已有能正常工作的 BepInEx 5 不必覆盖。参见 [官方安装指南](https://docs.bepinex.dev/articles/user_guide/installation/index.html)。
+4. 启动游戏一次，再退出，确认游戏目录生成了 `BepInEx/LogOutput.log`。在 Windows 的“启用或关闭 Windows 功能”中启用 **.NET Framework 3.5（包括 .NET 2.0 和 3.0）**；若编译器已经存在则跳过。
+
+**开始安装：**关闭游戏，在解压后的本项目目录打开 PowerShell，把下面的 `-GamePath` 改为你刚才找到的目录，然后运行：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Install.ps1 -GamePath 'D:\steam\steamapps\common\ObraDinn' -DownloadHintData
+```
+
+`-ExecutionPolicy Bypass` 只作用于这次 PowerShell 进程，不修改系统策略；请先确认你下载的是本仓库源码。安装不需要默认以管理员身份运行。
+
+该命令检查依赖，从原作者仓库获取固定版本的两个数据文件，在本机编译，再安装到 `BepInEx/plugins/ObraDinnInGameHints/`。只替换本插件 DLL；已有版本会备份，游戏存档与提示记录保留。数据与产物仅保存在本地，不上传。
+
+安装完成后启动游戏，打开航海日志，点击右下角小黄鸭或按 **H**。先看普通提示，最终提示需要连续两次确认。更新源码后重跑同一命令即可；已有数据校验一致时不会重复下载。修改过数据的用户应使用下面的离线安装方式。
+
+### 离线安装与预检查
+
+已有自己的数据时，将两个 JSON 放入 `work/private_hint_source/`，然后省略 `-DownloadHintData`；也可以指定目录：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Install.ps1 -GamePath 'D:\steam\steamapps\common\ObraDinn' -PrivateDataDirectory 'C:\MyHints'
+```
+
+只检查环境、不下载、不构建、不安装：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Install.ps1 -GamePath 'D:\steam\steamapps\common\ObraDinn' -CheckOnly
+```
+
+### 常见问题
+
+| 现象 | 处理方式 |
+| --- | --- |
+| 找不到游戏或程序集 | `-GamePath` 应指向含 `ObraDinn.exe` 的目录，不是 `ObraDinn_Data`。 |
+| 缺少 BepInEx 或没有小黄鸭 | 检查 BepInEx 位数、是否成功生成 `BepInEx/LogOutput.log`，确认插件已加载。必要时关闭该游戏 Steam Overlay 后重试。 |
+| 找不到 .NET 3.5 编译器 | 启用 Windows 的 .NET Framework 3.5 功能；仅安装 .NET 8/9 不能替代。 |
+| 下载失败 | 检查能否访问 `raw.githubusercontent.com`，或用上面的固定版本文件链接下载后离线安装。不要保存 GitHub 网页 HTML 冒充 JSON。 |
+| 数据校验不一致 | 工具不会覆盖你修改过的文件。自定义数据请省略下载参数，或指定新的数据目录。 |
+| 游戏正在运行 | 完全退出游戏，再安装。工具不会自动结束游戏进程。 |
+| 写入失败 | 检查文件占用和游戏目录写权限，确认备份后重试，不要删除其他插件。 |
+
+恢复旧版时，退出游戏，将插件目录内对应 `.bak` 备份复制回 `ObraDinnInGameHints.dll`。版本修复记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 使用前提
 
