@@ -29,6 +29,7 @@ namespace ObraDinnInGameHints
         private JsonHintStateStore stateStore;
         private HintEngine engine;
         private DuckUiController ui;
+        private GameObject uiHost;
 
         private ConfigEntry<bool> enabledEntry;
         private ConfigEntry<bool> soundEntry;
@@ -138,9 +139,9 @@ namespace ObraDinnInGameHints
                 stateStore = new JsonHintStateStore(statePath, LogWarning);
                 engine = new HintEngine(repository, progressSource, stateStore);
 
-                GameObject host = new GameObject("ObraDinnInGameHints");
-                DontDestroyOnLoad(host);
-                ui = host.AddComponent<DuckUiController>();
+                uiHost = new GameObject("ObraDinnInGameHints");
+                DontDestroyOnLoad(uiHost);
+                ui = uiHost.AddComponent<DuckUiController>();
                 ui.Initialize(this);
 
                 harmony = new Harmony(PluginId);
@@ -151,6 +152,7 @@ namespace ObraDinnInGameHints
             {
                 Logger.LogError("In-game hints disabled: " + ex.GetType().Name + ": " + ex.Message);
                 enabled = false;
+                Cleanup();
             }
         }
 
@@ -176,6 +178,10 @@ namespace ObraDinnInGameHints
             if (ui != null)
                 ui.SetBookActive(false, null);
             mouseInputOverrideActive = false;
+            // Force a fresh book binding when the component is enabled again.
+            lastActiveBook = null;
+            if (progressSource != null)
+                progressSource.SetBook(null);
             Diag("Plugin.OnDisable"); DumpSelf("OnDisable");
         }
 
@@ -202,18 +208,19 @@ namespace ObraDinnInGameHints
             try { current = Book.active; }
             catch { }
 
-            if (current != null && lastActiveBook == null)
+            if (current != lastActiveBook)
             {
-                if (!diagLoggedOnce)
+                if (lastActiveBook != null)
+                    OnBookHidden(lastActiveBook);
+                if (current != null)
                 {
-                    Diag("Book.active became non-null; showing duck entry.");
-                    diagLoggedOnce = true;
+                    if (!diagLoggedOnce)
+                    {
+                        Diag("Book.active became non-null; showing duck entry.");
+                        diagLoggedOnce = true;
+                    }
+                    OnBookShown(current);
                 }
-                OnBookShown(current);
-            }
-            else if (current == null && lastActiveBook != null)
-            {
-                OnBookHidden(lastActiveBook);
             }
             lastActiveBook = current;
 
@@ -224,12 +231,41 @@ namespace ObraDinnInGameHints
         private void OnDestroy()
         {
             Diag("Plugin.OnDestroy"); DumpSelf("OnDestroy");
+            Cleanup();
+        }
+
+        private void Cleanup()
+        {
             if (ui != null)
                 ui.SetBookActive(false, null);
             mouseInputOverrideActive = false;
             if (harmony != null)
+            {
                 harmony.UnpatchSelf();
-            Instance = null;
+                harmony = null;
+            }
+            if (uiHost != null)
+            {
+                Destroy(uiHost);
+                uiHost = null;
+                ui = null;
+            }
+            if (Instance == this)
+                Instance = null;
+        }
+
+        internal void OnProfileLoaded(string id)
+        {
+            if (progressSource == null)
+                return;
+            // A candidate holds the old save's progress and must not survive a load.
+            if (ui != null)
+                ui.SetBookActive(false, null);
+            lastActiveBook = null;
+            progressSource.SetBook(null);
+            progressSource.SetActiveProfile(id);
+            if (engine != null)
+                engine.ClearSessionExclusions();
         }
 
         private void OnApplicationQuit()
@@ -334,7 +370,7 @@ namespace ObraDinnInGameHints
         private static void Postfix(string id)
         {
             if (InGameHintsPlugin.Instance != null)
-                InGameHintsPlugin.Instance.ProgressSource.SetActiveProfile(id);
+                InGameHintsPlugin.Instance.OnProfileLoaded(id);
         }
     }
 

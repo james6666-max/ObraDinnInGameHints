@@ -9,9 +9,16 @@ namespace ObraDinnInGameHints
 {
     internal sealed class JsonHintStateStore : IHintStateStore
     {
+        private const string JsonString = @"""((?:\\[""\\/bfnrt]|\\u[0-9a-fA-F]{4}|[^""\\\x00-\x1f])*)""";
         private static readonly Regex EntryRegex = new Regex(
-            "\\{\\\"profile\\\":\\\"((?:\\\\.|[^\\\"])*)\\\",\\\"face\\\":\\\"((?:\\\\.|[^\\\"])*)\\\",\\\"branch\\\":([01]),\\\"reflected\\\":(true|false),\\\"revealed\\\":([0-9]+),\\\"final\\\":(true|false)\\}",
+            @"\G\s*\{\s*""profile""\s*:\s*" + JsonString +
+            @"\s*,\s*""face""\s*:\s*" + JsonString +
+            @"\s*,\s*""branch""\s*:\s*([01])\s*,\s*""reflected""\s*:\s*(true|false)" +
+            @"\s*,\s*""revealed""\s*:\s*(0|[1-9][0-9]*)\s*,\s*""final""\s*:\s*(true|false)\s*\}",
             RegexOptions.CultureInvariant);
+        private static readonly Regex DocumentRegex = new Regex(
+            @"\A\s*\{\s*""version""\s*:\s*1\s*,\s*""entries""\s*:\s*\[(.*)\]\s*\}\s*\z",
+            RegexOptions.CultureInvariant | RegexOptions.Singleline);
 
         private readonly string path;
         private readonly Action<string> log;
@@ -33,8 +40,17 @@ namespace ObraDinnInGameHints
 
         public void Put(string profileId, string faceId, HintBranch branch, HintProgress progress)
         {
-            states[MakeKey(profileId, faceId, branch)] = progress.Clone();
-            Save();
+            string key = MakeKey(profileId, faceId, branch);
+            HintProgress previous;
+            bool existed = states.TryGetValue(key, out previous);
+            states[key] = progress.Clone();
+            try { Save(); }
+            catch
+            {
+                if (existed) states[key] = previous;
+                else states.Remove(key);
+                throw;
+            }
         }
 
         public void ResetProfile(string profileId)
@@ -46,9 +62,15 @@ namespace ObraDinnInGameHints
                 if (key.StartsWith(prefix, StringComparison.Ordinal))
                     remove.Add(key);
             }
+            Dictionary<string, HintProgress> previous = new Dictionary<string, HintProgress>(states);
             for (int i = 0; i < remove.Count; i++)
                 states.Remove(remove[i]);
-            Save();
+            try { Save(); }
+            catch
+            {
+                foreach (string key in remove) states[key] = previous[key];
+                throw;
+            }
         }
 
         private void Load()
@@ -58,14 +80,17 @@ namespace ObraDinnInGameHints
             try
             {
                 string json = File.ReadAllText(path, Encoding.UTF8);
-                if (json.IndexOf("\"version\":1", StringComparison.Ordinal) < 0 ||
-                    json.IndexOf("\"entries\":[", StringComparison.Ordinal) < 0)
+                Match document = DocumentRegex.Match(json);
+                if (!document.Success)
                     throw new InvalidOperationException("Unsupported state schema.");
 
-                MatchCollection matches = EntryRegex.Matches(json);
-                for (int i = 0; i < matches.Count; i++)
+                string entries = document.Groups[1].Value.Trim();
+                int offset = 0;
+                while (offset < entries.Length)
                 {
-                    Match match = matches[i];
+                    Match match = EntryRegex.Match(entries, offset);
+                    if (!match.Success)
+                        throw new InvalidOperationException("Invalid state entry.");
                     string profile = Unescape(match.Groups[1].Value);
                     string face = Unescape(match.Groups[2].Value);
                     HintBranch branch = match.Groups[3].Value == "0" ? HintBranch.Identity : HintBranch.Fate;
@@ -75,7 +100,14 @@ namespace ObraDinnInGameHints
                         Revealed = int.Parse(match.Groups[5].Value, CultureInfo.InvariantCulture),
                         FinalRevealed = match.Groups[6].Value == "true"
                     };
-                    states[MakeKey(profile, face, branch)] = progress;
+                    states.Add(MakeKey(profile, face, branch), progress);
+                    offset = match.Index + match.Length;
+                    while (offset < entries.Length && char.IsWhiteSpace(entries[offset])) offset++;
+                    if (offset < entries.Length)
+                    {
+                        if (entries[offset++] != ',' || offset == entries.Length)
+                            throw new InvalidOperationException("Invalid state separator.");
+                    }
                 }
             }
             catch (Exception ex)
@@ -91,7 +123,7 @@ namespace ObraDinnInGameHints
         private void Save()
         {
             string directory = Path.GetDirectoryName(path);
-            if (!Directory.Exists(directory))
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
                 Directory.CreateDirectory(directory);
             string temporary = path + ".tmp";
             File.WriteAllText(temporary, Serialize(), new UTF8Encoding(false));
@@ -99,16 +131,9 @@ namespace ObraDinnInGameHints
             if (File.Exists(path))
             {
                 string backup = path + ".bak";
-                try
-                {
-                    File.Replace(temporary, path, backup);
-                    return;
-                }
-                catch
-                {
-                    File.Copy(path, backup, true);
-                    File.Delete(path);
-                }
+                // If atomic replacement fails, leave the original file intact.
+                File.Replace(temporary, path, backup);
+                return;
             }
             File.Move(temporary, path);
         }
@@ -151,7 +176,15 @@ namespace ObraDinnInGameHints
 
         private static string Escape(string value)
         {
-            return value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n");
+            StringBuilder builder = new StringBuilder();
+            for (int i = 0; i < value.Length; i++)
+            {
+                char c = value[i];
+                if (c == '\\' || c == '"') builder.Append('\\').Append(c);
+                else if (c < 32) builder.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
+                else builder.Append(c);
+            }
+            return builder.ToString();
         }
 
         private static string Unescape(string value)
@@ -170,6 +203,14 @@ namespace ObraDinnInGameHints
                 {
                     if (c == 'n') builder.Append('\n');
                     else if (c == 'r') builder.Append('\r');
+                    else if (c == 't') builder.Append('\t');
+                    else if (c == 'b') builder.Append('\b');
+                    else if (c == 'f') builder.Append('\f');
+                    else if (c == 'u')
+                    {
+                        builder.Append((char)int.Parse(value.Substring(i + 1, 4), NumberStyles.HexNumber, CultureInfo.InvariantCulture));
+                        i += 4;
+                    }
                     else builder.Append(c);
                     escaping = false;
                 }

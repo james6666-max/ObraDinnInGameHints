@@ -24,6 +24,18 @@ steam_appid.txt
 *.pending
 *.state
 state.json
+state.json.corrupt-*.json
+source-provenance.json
+
+# Local credentials are never part of public source releases
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+id_rsa
+id_ed25519
 
 # Compiled or packaged binaries must not be committed. A build embeds
 # private hint data and should be produced locally when needed.

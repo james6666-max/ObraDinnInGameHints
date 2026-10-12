@@ -45,11 +45,19 @@ internal static class LogicTests
         Run("resolved branch selection", ResolvedBranchSelection);
         Run("session exclusion", SessionExclusion);
         Run("double-confirm boundary", FinalBoundary);
+        Run("final cannot skip tiers", FinalCannotSkipTiers);
+        Run("stale candidate profile isolation", StaleCandidateProfileIsolation);
+        Run("candidate refreshes clue progress", CandidateRefreshesClueProgress);
+        Run("latest hint respects restored save progress", LatestHintRespectsRestoredSaveProgress);
+        Run("resolved candidate cannot reveal", ResolvedCandidateCannotReveal);
         Run("game ID state key", GameIdStateKey);
         Run("centered UI actions", CenteredUiActions);
         Run("native cursor retry state", NativeCursorRetryState);
         Run("mouse input override state", MouseInputOverrideState);
         Run("json state isolation", JsonStateIsolation);
+        Run("json rejects partial documents", JsonRejectsPartialDocuments);
+        Run("json whitespace and escaped identifiers", JsonWhitespaceAndEscapedIdentifiers);
+        Run("json failed save preserves state", JsonFailedSavePreservesState);
         Console.WriteLine(failures == 0 ? "ALL TESTS PASSED" : failures + " TESTS FAILED");
         return failures == 0 ? 0 : 1;
     }
@@ -150,6 +158,179 @@ internal static class LogicTests
         Equal(AdvanceResultKind.Hint, engine.RequestNextHint(candidate).Kind);
         Equal(1, store.Get("P1", "crew_real_06", HintBranch.Identity).Revealed);
         Equal(0, store.Get("P1", "face_01", HintBranch.Identity).Revealed);
+    }
+
+    private static void FinalCannotSkipTiers()
+    {
+        Repository repo = new Repository();
+        repo.Items.Add(Record("face_01", 1));
+        Progress progress = new Progress { ActiveProfileId = "P1" };
+        progress.Values["face_01"] = P("game_01", true, 3, 3, false, false, false);
+        MemoryStore store = new MemoryStore();
+        HintEngine engine = new HintEngine(repo, progress, store);
+        Equal(AdvanceResultKind.Locked, engine.RevealFinalHint(engine.SelectCandidate()).Kind);
+        Equal(false, store.Get("P1", "game_01", HintBranch.Identity).FinalRevealed);
+    }
+
+    private static void StaleCandidateProfileIsolation()
+    {
+        Repository repo = new Repository();
+        repo.Items.Add(Record("face_01", 1));
+        Progress progress = new Progress { ActiveProfileId = "P1" };
+        progress.Values["face_01"] = P("game_01", true, 3, 3, false, false, false);
+        MemoryStore store = new MemoryStore();
+        HintEngine engine = new HintEngine(repo, progress, store);
+        HintCandidate candidate = engine.SelectCandidate();
+        progress.ActiveProfileId = "P2";
+        Equal(AdvanceResultKind.Locked, engine.RequestNextHint(candidate).Kind);
+        Equal(AdvanceResultKind.Locked, engine.RevealFinalHint(candidate).Kind);
+        Equal(0, store.Get("P2", "game_01", HintBranch.Identity).Revealed);
+        progress.ActiveProfileId = "P1";
+        engine.ResetCurrentProfile();
+        Equal(AdvanceResultKind.Locked, engine.RequestNextHint(candidate).Kind);
+    }
+
+    private static void CandidateRefreshesClueProgress()
+    {
+        Repository repo = new Repository();
+        repo.Items.Add(Record("face_01", 1));
+        Progress progress = new Progress { ActiveProfileId = "P1" };
+        progress.Values["face_01"] = P("game_01", true, 3, 3, false, false, false);
+        MemoryStore store = new MemoryStore();
+        HintEngine engine = new HintEngine(repo, progress, store);
+        HintCandidate candidate = engine.SelectCandidate();
+        Equal(AdvanceResultKind.Hint, engine.RequestNextHint(candidate).Kind);
+        progress.Values["face_01"] = P("game_01", true, 0, 3, false, false, false);
+        Equal(AdvanceResultKind.Locked, engine.RequestNextHint(candidate).Kind);
+        store.Put("P1", "game_01", HintBranch.Identity, new HintProgress { Revealed = 3 });
+        Equal(AdvanceResultKind.Locked, engine.RevealFinalHint(candidate).Kind);
+        progress.Values["face_01"] = P("game_01", true, 3, 3, false, false, false);
+        Equal(AdvanceResultKind.FinalConfirmationRequired, engine.RequestNextHint(candidate).Kind);
+        Equal(AdvanceResultKind.FinalHint, engine.RevealFinalHint(candidate).Kind);
+        Equal(AdvanceResultKind.NothingAvailable, engine.RequestNextHint(candidate).Kind);
+    }
+
+    private static void LatestHintRespectsRestoredSaveProgress()
+    {
+        Repository repo = new Repository();
+        repo.Items.Add(Record("face_01", 1));
+        Progress progress = new Progress { ActiveProfileId = "P1" };
+        progress.Values["face_01"] = P("game_01", true, 3, 3, false, false, true);
+        MemoryStore store = new MemoryStore();
+        HintEngine engine = new HintEngine(repo, progress, store);
+        HintCandidate candidate = engine.SelectCandidate();
+        for (int i = 0; i < 3; i++)
+            Equal(AdvanceResultKind.Hint, engine.RequestNextHint(candidate).Kind);
+        Equal("i3", engine.GetLatestHint(candidate));
+
+        // Loading earlier progress in the same slot must not display a later historical tier.
+        engine.ClearSessionExclusions();
+        progress.Values["face_01"] = P("game_01", true, 1, 3, false, false, true);
+        candidate = engine.SelectCandidate();
+        Equal("i1", engine.GetLatestHint(candidate));
+        Equal(AdvanceResultKind.Locked, engine.RequestNextHint(candidate).Kind);
+        Equal(3, store.Get("P1", "game_01", HintBranch.Identity).Revealed);
+
+        // Preserve history so previously read tiers return as their evidence is recovered.
+        progress.Values["face_01"] = P("game_01", true, 2, 3, false, false, true);
+        Equal("i2", engine.GetLatestHint(engine.SelectCandidate()));
+        progress.Values["face_01"] = P("game_01", true, 3, 3, false, false, true);
+        Equal("i3", engine.GetLatestHint(engine.SelectCandidate()));
+    }
+
+    private static void ResolvedCandidateCannotReveal()
+    {
+        Repository repo = new Repository();
+        repo.Items.Add(Record("face_01", 1));
+        Progress progress = new Progress { ActiveProfileId = "P1" };
+        progress.Values["face_01"] = P("game_01", true, 3, 3, false, false, false);
+        HintEngine engine = new HintEngine(repo, progress, new MemoryStore());
+        HintCandidate candidate = engine.SelectCandidate();
+        progress.Values["face_01"].IdentityResolved = true;
+        Equal(AdvanceResultKind.Locked, engine.RequestNextHint(candidate).Kind);
+        Equal(AdvanceResultKind.Locked, engine.RevealFinalHint(candidate).Kind);
+        progress.Values["face_01"].IdentityResolved = false;
+        progress.Values["face_01"].MarkedCorrect = true;
+        Equal(AdvanceResultKind.Locked, engine.RequestNextHint(candidate).Kind);
+    }
+
+    private static void JsonRejectsPartialDocuments()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "ObraDinnHintTests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "state.json");
+        try
+        {
+            JsonHintStateStore store = new JsonHintStateStore(path, null);
+            store.Put("A", "face_01", HintBranch.Identity, new HintProgress { Revealed = 2 });
+            string valid = File.ReadAllText(path);
+            string[] invalid = new[]
+            {
+                valid.Substring(0, valid.Length - 2),
+                valid.Replace("\"version\":1", "\"version\":10"),
+                valid.Replace("]}", ",{\"broken\":true}]}"),
+                valid.Replace("]}", ",]}"),
+                valid + " trailing garbage"
+            };
+            for (int i = 0; i < invalid.Length; i++)
+            {
+                File.WriteAllText(path, invalid[i]);
+                bool logged = false;
+                JsonHintStateStore loaded = new JsonHintStateStore(path, delegate(string message) { logged = true; });
+                Equal(0, loaded.Get("A", "face_01", HintBranch.Identity).Revealed);
+                Equal(true, logged);
+            }
+            Equal(true, Directory.GetFiles(dir, "*.corrupt-*.json").Length > 0);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    private static void JsonWhitespaceAndEscapedIdentifiers()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "ObraDinnHintTests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "state.json");
+        try
+        {
+            string profile = "A\t\n\r\"\\";
+            JsonHintStateStore store = new JsonHintStateStore(path, null);
+            store.Put(profile, "face\b\f", HintBranch.Fate, new HintProgress { Revealed = 2 });
+            string json = File.ReadAllText(path).Replace(":", " : ").Replace(",", ",\n ");
+            File.WriteAllText(path, "\n " + json + "\n");
+            JsonHintStateStore loaded = new JsonHintStateStore(path, null);
+            Equal(2, loaded.Get(profile, "face\b\f", HintBranch.Fate).Revealed);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    private static void JsonFailedSavePreservesState()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "ObraDinnHintTests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "state.json");
+        try
+        {
+            JsonHintStateStore store = new JsonHintStateStore(path, null);
+            store.Put("A", "face_01", HintBranch.Identity, new HintProgress { Revealed = 1 });
+            string original = File.ReadAllText(path);
+            using (FileStream held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                bool failed = false;
+                try { store.Put("A", "face_01", HintBranch.Identity, new HintProgress { Revealed = 2 }); }
+                catch (IOException) { failed = true; }
+                Equal(true, failed);
+                Equal(1, store.Get("A", "face_01", HintBranch.Identity).Revealed);
+                Equal(original, File.ReadAllText(path));
+                failed = false;
+                try { store.ResetProfile("A"); }
+                catch (IOException) { failed = true; }
+                Equal(true, failed);
+                Equal(1, store.Get("A", "face_01", HintBranch.Identity).Revealed);
+                Equal(original, File.ReadAllText(path));
+            }
+            Equal(1, new JsonHintStateStore(path, null).Get("A", "face_01", HintBranch.Identity).Revealed);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
     }
 
     private static void JsonStateIsolation()

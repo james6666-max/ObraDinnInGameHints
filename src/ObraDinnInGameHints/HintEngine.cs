@@ -9,6 +9,8 @@ namespace ObraDinnInGameHints
         private readonly IProgressSource progressSource;
         private readonly IHintStateStore stateStore;
         private readonly HashSet<string> sessionExcluded = new HashSet<string>(StringComparer.Ordinal);
+        private HintCandidate selectedCandidate;
+        private string selectedProfile;
 
         public HintEngine(IHintRepository repository, IProgressSource progressSource, IHintStateStore stateStore)
         {
@@ -35,6 +37,8 @@ namespace ObraDinnInGameHints
                 if (best == null || Compare(candidate, best) < 0)
                     best = candidate;
             }
+            selectedCandidate = best;
+            selectedProfile = progressSource.ActiveProfileId;
             return best;
         }
 
@@ -110,7 +114,11 @@ namespace ObraDinnInGameHints
 
         public AdvanceResult RequestNextHint(HintCandidate candidate)
         {
+            if (!RefreshCandidate(candidate))
+                return new AdvanceResult { Kind = AdvanceResultKind.Locked };
             HintProgress state = stateStore.Get(progressSource.ActiveProfileId, candidate.Progress.GameFaceId, candidate.Branch);
+            if (state.FinalRevealed)
+                return new AdvanceResult { Kind = AdvanceResultKind.NothingAvailable };
             state.Reflected = true;
             int unlocked = GetUnlockedNonFinal(candidate);
 
@@ -158,10 +166,12 @@ namespace ObraDinnInGameHints
 
         public AdvanceResult RevealFinalHint(HintCandidate candidate)
         {
-            if (!candidate.AllRelevantCluesVisited || candidate.Hints.Count == 0)
+            if (!RefreshCandidate(candidate) || !candidate.AllRelevantCluesVisited || candidate.Hints.Count == 0)
                 return new AdvanceResult { Kind = AdvanceResultKind.Locked };
 
             HintProgress state = stateStore.Get(progressSource.ActiveProfileId, candidate.Progress.GameFaceId, candidate.Branch);
+            if (state.Revealed < candidate.NonFinalCount)
+                return new AdvanceResult { Kind = AdvanceResultKind.Locked };
             state.Reflected = true;
             state.Revealed = Math.Max(state.Revealed, candidate.NonFinalCount);
             state.FinalRevealed = true;
@@ -178,7 +188,8 @@ namespace ObraDinnInGameHints
 
         public string GetLatestHint(HintCandidate candidate)
         {
-            int revealed = Math.Min(candidate.HintProgress.Revealed, candidate.NonFinalCount);
+            // A restored or restarted save can have less evidence than its saved hint history.
+            int revealed = Math.Min(candidate.HintProgress.Revealed, GetUnlockedNonFinal(candidate));
             if (candidate.HintProgress.FinalRevealed && candidate.Hints.Count > 0)
                 return candidate.Hints[candidate.Hints.Count - 1];
             if (revealed <= 0)
@@ -195,6 +206,22 @@ namespace ObraDinnInGameHints
         public void ClearSessionExclusions()
         {
             sessionExcluded.Clear();
+            selectedCandidate = null;
+        }
+
+        private bool RefreshCandidate(HintCandidate candidate)
+        {
+            // A panel can outlive its profile or the game progress used to select it.
+            if (candidate == null || !object.ReferenceEquals(candidate, selectedCandidate) ||
+                !string.Equals(selectedProfile, progressSource.ActiveProfileId, StringComparison.Ordinal))
+                return false;
+            SubjectProgress current = progressSource.GetProgress(candidate.Record);
+            if (current == null || !current.Visible || current.MarkedCorrect ||
+                !string.Equals(current.GameFaceId, candidate.Progress.GameFaceId, StringComparison.Ordinal) ||
+                (candidate.Branch == HintBranch.Identity ? current.IdentityResolved : current.FateResolved))
+                return false;
+            candidate.Progress = current;
+            return true;
         }
 
         public void ResetCurrentProfile()

@@ -63,6 +63,8 @@ namespace ObraDinnInGameHints
         private bool unityCursorStateCaptured;
         private bool previousCursorVisible;
         private CursorLockMode previousCursorLockMode;
+        private Texture2D duckTexture;
+        private Sprite duckSprite;
 
         internal void Initialize(InGameHintsPlugin plugin)
         {
@@ -79,7 +81,10 @@ namespace ObraDinnInGameHints
                 TryAdoptBookFont(book);
             if (!active)
                 ClosePanel();
-            canvas.enabled = active;
+            if (canvas != null)
+                canvas.enabled = active;
+            if (!active && ownedEventSystem != null)
+                ownedEventSystem.gameObject.SetActive(false);
         }
 
         internal void Tick()
@@ -277,7 +282,7 @@ namespace ObraDinnInGameHints
                 faceImage.gameObject.SetActive(false);
                 titleText.text = "暂时没有安全提示";
                 bodyText.text = "当前日志里没有可可靠推荐、且尚未解决的目标。继续探索新的回忆，或稍后再来问小黄鸭。";
-                progressText.text = "提示系统不会提前解锁未见内容";
+                progressText.text = "提示按调查进度推荐，仍可能涉及尚未注意到的线索";
                 Configure(secondaryButton, "重新检查", true);
                 Configure(settingsButton, "设置", true);
                 Configure(closeButton, "关闭", true);
@@ -410,6 +415,20 @@ namespace ObraDinnInGameHints
 
         private void OnPrimary()
         {
+            try { OnPrimaryCore(); }
+            catch (IOException ex) { ShowStateSaveFailure(ex); }
+            catch (UnauthorizedAccessException ex) { ShowStateSaveFailure(ex); }
+        }
+
+        private void ShowStateSaveFailure(Exception error)
+        {
+            // State writes roll back on failure; keep the current view for retry.
+            progressText.text = "无法保存提示记录，请检查配置目录权限或文件占用后重试";
+            plugin.DiagLog("Hint state save failed: " + error.GetType().Name);
+        }
+
+        private void OnPrimaryCore()
+        {
             if (mode == ViewMode.WarningOne)
             {
                 mode = ViewMode.WarningTwo;
@@ -467,6 +486,12 @@ namespace ObraDinnInGameHints
             {
                 mode = ViewMode.WarningOne;
                 RenderWarningOne();
+            }
+            else if (result.Kind == AdvanceResultKind.NothingAvailable)
+            {
+                candidate = plugin.Engine.SelectCandidate();
+                transientMessage = null;
+                RenderHint();
             }
             FocusFirstAvailable();
         }
@@ -612,6 +637,7 @@ namespace ObraDinnInGameHints
                 return;
             if (ownedEventSystem != null)
             {
+                ownedEventSystem.gameObject.SetActive(true);
                 ownedEventSystem.enabled = true;
                 return;
             }
@@ -639,7 +665,8 @@ namespace ObraDinnInGameHints
 
         private void DisableMouseInputAndRestoreCursor()
         {
-            plugin.SetMouseInputOverride(false);
+            if (plugin != null)
+                plugin.SetMouseInputOverride(false);
             if (!UiPresentation.ShouldRestoreMouseState(false, unityCursorStateCaptured))
                 return;
 
@@ -725,14 +752,17 @@ namespace ObraDinnInGameHints
 
         private void OnDisable()
         {
-            DisableMouseInputAndRestoreCursor();
-            RestoreNativeCursor();
+            ClosePanel();
         }
 
         private void OnDestroy()
         {
             DisableMouseInputAndRestoreCursor();
             RestoreNativeCursor();
+            if (duckSprite != null)
+                Destroy(duckSprite);
+            if (duckTexture != null)
+                Destroy(duckTexture);
         }
 
         private void TryAdoptBookFont(Book book)
@@ -841,10 +871,12 @@ namespace ObraDinnInGameHints
                     bytes = memory.ToArray();
                 }
                 Texture2D texture = new Texture2D(2, 2, TextureFormat.ARGB32, false);
+                duckTexture = texture;
                 texture.filterMode = FilterMode.Point;
                 texture.wrapMode = TextureWrapMode.Clamp;
                 texture.LoadImage(bytes);
                 Sprite sprite = Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height), new Vector2(0.5f, 0.5f), 100f);
+                duckSprite = sprite;
                 Image image = CreateImage("DuckIcon", parent, Color.black);
                 image.sprite = sprite;
                 image.preserveAspect = true;
