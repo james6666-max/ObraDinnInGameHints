@@ -21,7 +21,8 @@ try {
         for ($x = 0; $x -lt 64; $x++) {
             $pixel = $resized.GetPixel($x, $y)
             if ($pixel.A -ge 96) {
-                $resized.SetPixel($x, $y, [Drawing.Color]::FromArgb(255, 0, 0, 0))
+                # A white mask lets Unity apply the UI palette through Image.color.
+                $resized.SetPixel($x, $y, [Drawing.Color]::FromArgb(255, 255, 255, 255))
             }
             else {
                 $resized.SetPixel($x, $y, [Drawing.Color]::Transparent)

@@ -11,6 +11,15 @@ namespace ObraDinnInGameHints
 {
     public sealed class DuckUiController : MonoBehaviour
     {
+        // Community palette: opaque surfaces keep contrast independent of the game scene.
+        private static readonly Color Ink = new Color32(0x33, 0x33, 0x19, 0xff);
+        private static readonly Color Paper = new Color32(0xe5, 0xff, 0xff, 0xff);
+        private static readonly Color SecondaryInk = Color.Lerp(Ink, Paper, 0.75f);
+        private static readonly Color DividerInk = Color.Lerp(Ink, Paper, 0.32f);
+        private static readonly Color HoverPaper = Color.Lerp(Ink, Paper, 0.88f);
+        private static readonly Color PressedPaper = Color.Lerp(Ink, Paper, 0.72f);
+        private static readonly Color DisabledPaper = Color.Lerp(Ink, Paper, 0.25f);
+
         private enum ViewMode
         {
             Hint,
@@ -162,10 +171,10 @@ namespace ObraDinnInGameHints
             panelRect.sizeDelta = new Vector2(900f, 590f);
             panelRect.anchoredPosition = Vector2.zero;
 
-            titleText = CreateText("Title", panel.transform, 30, TextAnchor.MiddleCenter, Color.white);
+            titleText = CreateText("Title", panel.transform, 30, TextAnchor.MiddleCenter, Paper);
             SetRect(titleText.rectTransform, new Vector2(0f, 247f), new Vector2(800f, 48f));
 
-            contentDivider = CreateImage("ContentDivider", panel.transform, new Color(1f, 1f, 1f, 0.22f));
+            contentDivider = CreateImage("ContentDivider", panel.transform, DividerInk);
             contentDivider.raycastTarget = false;
             SetRect(contentDivider.rectTransform, new Vector2(0f, 211f), new Vector2(790f, 1f));
 
@@ -174,16 +183,16 @@ namespace ObraDinnInGameHints
             faceImage.raycastTarget = false;
             SetRect(faceImage.rectTransform, new Vector2(-330f, 75f), new Vector2(160f, 205f));
 
-            bodyText = CreateText("Body", panel.transform, 21, TextAnchor.UpperLeft, Color.white);
+            bodyText = CreateText("Body", panel.transform, 21, TextAnchor.UpperLeft, Paper);
             bodyText.horizontalOverflow = HorizontalWrapMode.Wrap;
             bodyText.verticalOverflow = VerticalWrapMode.Truncate;
             bodyText.lineSpacing = 1.16f;
             SetRect(bodyText.rectTransform, new Vector2(92f, 75f), new Vector2(560f, 220f));
 
-            progressText = CreateText("Progress", panel.transform, 16, TextAnchor.MiddleCenter, new Color(0.78f, 0.78f, 0.78f, 1f));
+            progressText = CreateText("Progress", panel.transform, 16, TextAnchor.MiddleCenter, SecondaryInk);
             SetRect(progressText.rectTransform, new Vector2(0f, -77f), new Vector2(780f, 34f));
 
-            actionDivider = CreateImage("ActionDivider", panel.transform, new Color(1f, 1f, 1f, 0.18f));
+            actionDivider = CreateImage("ActionDivider", panel.transform, DividerInk);
             actionDivider.raycastTarget = false;
             SetRect(actionDivider.rectTransform, new Vector2(0f, -108f), new Vector2(790f, 1f));
 
@@ -589,6 +598,7 @@ namespace ObraDinnInGameHints
         {
             view.GameObject.SetActive(visible);
             view.Label.text = label;
+            view.Label.color = interactable ? Ink : Paper;
             view.Button.interactable = interactable;
         }
 
@@ -792,9 +802,9 @@ namespace ObraDinnInGameHints
             GameObject go = new GameObject("HintPanel");
             go.transform.SetParent(parent, false);
             Image image = go.AddComponent<Image>();
-            image.color = new Color(0.02f, 0.02f, 0.02f, 0.97f);
+            image.color = Ink;
             Outline outline = go.AddComponent<Outline>();
-            outline.effectColor = Color.white;
+            outline.effectColor = Paper;
             outline.effectDistance = new Vector2(3f, -3f);
             return go;
         }
@@ -810,14 +820,14 @@ namespace ObraDinnInGameHints
             image.color = Color.white;
             Button button = go.AddComponent<Button>();
             ColorBlock colors = button.colors;
-            colors.normalColor = Color.white;
-            colors.highlightedColor = new Color(0.82f, 0.82f, 0.82f, 1f);
-            colors.pressedColor = new Color(0.62f, 0.62f, 0.62f, 1f);
-            colors.disabledColor = new Color(0.28f, 0.28f, 0.28f, 0.9f);
+            colors.normalColor = Paper;
+            colors.highlightedColor = HoverPaper;
+            colors.pressedColor = PressedPaper;
+            colors.disabledColor = DisabledPaper;
             button.colors = colors;
             button.navigation = new Navigation { mode = Navigation.Mode.Automatic };
 
-            Text text = CreateText("Label", go.transform, 20, TextAnchor.MiddleCenter, Color.black);
+            Text text = CreateText("Label", go.transform, 20, TextAnchor.MiddleCenter, Ink);
             text.rectTransform.anchorMin = Vector2.zero;
             text.rectTransform.anchorMax = Vector2.one;
             text.rectTransform.offsetMin = new Vector2(8f, 4f);
@@ -877,7 +887,7 @@ namespace ObraDinnInGameHints
                 texture.LoadImage(bytes);
                 Sprite sprite = Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height), new Vector2(0.5f, 0.5f), 100f);
                 duckSprite = sprite;
-                Image image = CreateImage("DuckIcon", parent, Color.black);
+                Image image = CreateImage("DuckIcon", parent, Ink);
                 image.sprite = sprite;
                 image.preserveAspect = true;
                 image.raycastTarget = false;
